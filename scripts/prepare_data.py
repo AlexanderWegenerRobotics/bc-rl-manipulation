@@ -11,7 +11,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Process raw episode logs into HDF5 dataset.")
     parser.add_argument('--log-dir',  type=Path, default=Path('data/raw'),       help="Root folder containing numbered episode directories.")
     parser.add_argument('--out',      type=Path, default=Path('data/processed/dataset.h5'), help="Output HDF5 file path.")
-    parser.add_argument('--arm',      type=str,  default='arm_left',             help="Which arm log to load (arm_left or arm_right).")
+    parser.add_argument('--arm',      type=str,  default='arm_right',             help="Which arm log to load (arm_left or arm_right).")
     parser.add_argument('--min-steps',type=int,  default=50,                     help="Minimum timesteps for an episode to be included.")
     return parser.parse_args()
 

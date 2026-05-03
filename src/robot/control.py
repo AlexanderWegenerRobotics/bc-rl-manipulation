@@ -11,6 +11,7 @@ class ImpedanceController:
         self.K_cart     = np.diag(config['K_cart'])
         self.D_cart     = np.diag(config['D_cart'])
         self.K_null     = config['K_null']
+        self.D_null     = config['D_null']
         self.tau_max    = np.array(config['tau_max'])
         self.q_nominal  = np.array(config['q_nominal'])
         self.gravity_comp = config.get('gravity_compensation', True)
@@ -31,7 +32,7 @@ class ImpedanceController:
 
         J_pinv         = np.linalg.pinv(J)
         null_projector = np.eye(len(q)) - J_pinv @ J
-        tau_null       = self.K_null * (self.q_nominal - q)
+        tau_null = self.K_null * (self.q_nominal - q) - self.D_null * qd
 
         tau = tau_task + null_projector @ tau_null
 
@@ -50,7 +51,7 @@ class ImpedanceController:
     def _clip_torques(self, tau: np.ndarray) -> np.ndarray:
         """Clip torques to hardware limits."""
         tau_clipped = np.clip(tau, -self.tau_max, self.tau_max)
-        if not np.allclose(tau, tau_clipped):
-            exceeded = np.where(np.abs(tau) > self.tau_max)[0]
-            print(f"Warning: Torque limits exceeded on joints {exceeded}")
+        #if not np.allclose(tau, tau_clipped):
+            #exceeded = np.where(np.abs(tau) > self.tau_max)[0]
+            #print(f"Warning: Torque limits exceeded on joints {exceeded}")
         return tau_clipped

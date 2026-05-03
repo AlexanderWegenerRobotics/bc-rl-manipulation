@@ -51,28 +51,39 @@ def _transform_ee_to_world(pos_base: np.ndarray, quat_base: np.ndarray,
     return pos_world, quat_wxyz
 
 
+def _mat_from_flat(flat: np.ndarray) -> np.ndarray:
+    """Reconstruct 3x3 rotation matrix from flat column-major 4x4 (16 values per row)."""
+    # Column-major layout: indices [0,1,2]=col0, [4,5,6]=col1, [8,9,10]=col2
+    rot = np.stack([
+        np.stack([flat[:, 0], flat[:, 4], flat[:, 8]], axis=1),
+        np.stack([flat[:, 1], flat[:, 5], flat[:, 9]], axis=1),
+        np.stack([flat[:, 2], flat[:, 6], flat[:, 10]], axis=1),
+    ], axis=1)
+    return rot
+
+
 def _extract_ee_from_arm(df: pd.DataFrame) -> tuple:
     """Extract EE position and quaternion from flat O_T_EE columns (column-major 4x4)."""
-    pos  = df[['O_T_EE_12', 'O_T_EE_13', 'O_T_EE_14']].values
-    rot_flat = df[[f'O_T_EE_{i}' for i in range(12)]].values.reshape(-1, 3, 4)[:, :, :3]
+    pos      = df[['O_T_EE_12', 'O_T_EE_13', 'O_T_EE_14']].values
+    flat     = df[[f'O_T_EE_{i}' for i in range(16)]].values
+    rot_mats = _mat_from_flat(flat)
     quat_list = []
-    for mat in rot_flat:
+    for mat in rot_mats:
         q_xyzw = R.from_matrix(mat).as_quat()
         quat_list.append([q_xyzw[3], q_xyzw[0], q_xyzw[1], q_xyzw[2]])
-    quat = np.array(quat_list)
-    return pos, quat
+    return pos, np.array(quat_list)
 
 
 def _extract_ee_cmd_from_arm(df: pd.DataFrame) -> tuple:
     """Extract commanded EE position and quaternion from O_T_EE_cmd columns."""
-    pos  = df[['O_T_EE_cmd_12', 'O_T_EE_cmd_13', 'O_T_EE_cmd_14']].values
-    rot_flat = df[[f'O_T_EE_cmd_{i}' for i in range(12)]].values.reshape(-1, 3, 4)[:, :, :3]
+    pos      = df[['O_T_EE_cmd_12', 'O_T_EE_cmd_13', 'O_T_EE_cmd_14']].values
+    flat     = df[[f'O_T_EE_cmd_{i}' for i in range(16)]].values
+    rot_mats = _mat_from_flat(flat)
     quat_list = []
-    for mat in rot_flat:
+    for mat in rot_mats:
         q_xyzw = R.from_matrix(mat).as_quat()
         quat_list.append([q_xyzw[3], q_xyzw[0], q_xyzw[1], q_xyzw[2]])
-    quat = np.array(quat_list)
-    return pos, quat
+    return pos, np.array(quat_list)
 
 
 def _load_meta(meta_path: Path) -> dict:
@@ -182,7 +193,7 @@ def load_episode(episode_dir: Path, arm: str = 'arm_left') -> Episode | None:
     )
 
 
-def load_all_episodes(log_root: Path, arm: str = 'arm_left') -> list[Episode]:
+def load_all_episodes(log_root: Path, arm: str = 'arm_right') -> list[Episode]:
     """Load all episode folders from log_root, skipping incomplete or failed ones."""
     dirs     = sorted([d for d in log_root.iterdir() if d.is_dir()])
     episodes = []

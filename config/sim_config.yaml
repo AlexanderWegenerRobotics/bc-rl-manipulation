@@ -1,7 +1,11 @@
+logging:
+  enabled: true
+  log_dir: "logs/rollouts"
+
 simulation:
   scene_path: "models/mujoco/scene.xml"
   steps_per_action: 5
-  q0: [-0.3, -1.1, 0.3, -2.0, 0.5, 2.9, -0.9]
+  q0: [0.3, -1.1, -0.3, -2.0, -0.5, 2.9, 0.9]
 
 robot:
   urdf_path: "models/urdf/franka_fr3/fr3_franka_hand.urdf"
@@ -22,9 +26,10 @@ grasp_detection:
 control:
   K_cart: [1000, 1000, 1000, 80, 80, 80]
   D_cart: [70, 70, 70, 10, 10, 10]
-  K_null: 10
+  K_null: 20
+  D_null: 1.0
   tau_max: [87, 87, 87, 87, 12, 12, 12]
-  q_nominal: [-0.3, -1.1, 0.3, -2.0, 0.5, 2.9, -0.9]
+  q_nominal: [0.3, -1.1, -0.3, -2.0, -0.5, 2.9, 0.9]
   gravity_compensation: true
 
 rendering:
@@ -36,5 +41,5 @@ rendering:
     fps: 30
     lookat: [0.4, 0.0, 0.5]
     azimuth: 140
-    elevation: -25
+    elevation: -20
     distance: 1.8

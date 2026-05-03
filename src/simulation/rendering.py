@@ -18,7 +18,7 @@ class Renderer:
         self.fps          = cam_cfg.get("fps", 30)
         self.lookat       = cam_cfg.get("lookat", [0.3, 0.0, 0.4])
         self.azimuth      = cam_cfg.get("azimuth", 135)
-        self.elevation    = cam_cfg.get("elevation", -25)
+        self.elevation    = cam_cfg.get("elevation", -20)
         self.distance     = cam_cfg.get("distance", 1.8)
         self._window_name = config.get('window_name', 'Simulation')
         self.stop_request = False

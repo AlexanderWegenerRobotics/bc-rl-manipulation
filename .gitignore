@@ -12,7 +12,7 @@ build/
 # Virtual environments
 .venv/
 venv/
-env/
+
 
 # Jupyter
 .ipynb_checkpoints/
@@ -21,6 +21,7 @@ env/
 # Data
 data/raw/
 data/processed/*.h5
+logs/rollouts/*.h5
 
 # Model checkpoints
 models/checkpoints/
