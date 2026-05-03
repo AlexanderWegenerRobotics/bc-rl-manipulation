@@ -2,33 +2,33 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 from pathlib import Path
-from scipy.spatial.transform import Rotation as R
 
 from src.data.loader import Episode, load_from_hdf5
 
 
 class BCDataset(Dataset):
     """
-    PyTorch Dataset for behaviour cloning with delta actions.
+    PyTorch Dataset for behaviour cloning with absolute actions.
 
-    Observation vector per timestep (22-dim):
-        ee_pos      (3)   world frame
-        ee_quat     (4)   wxyz world frame
-        obj_pos     (3)   world frame
-        obj_quat    (4)   wxyz
-        pick_pos    (3)   world frame
-        place_pos   (3)   world frame
-        gripper_w   (1)
-        mode        (1)   0=unimanual, 1=bimanual
+    Observation vector per timestep (28-dim):
+        ee_pos          (3)   world frame
+        ee_quat         (4)   wxyz world frame
+        obj_pos         (3)   world frame
+        obj_quat        (4)   wxyz
+        pick_pos        (3)   world frame
+        place_pos       (3)   world frame
+        rel_ee_to_obj   (3)   ee_pos - obj_pos  (direct error signal)
+        rel_ee_to_place (3)   ee_pos - place_pos
+        gripper_w       (1)
+        mode            (1)   0=unimanual, 1=bimanual
 
-    Action vector per timestep (7-dim):
-        delta_pos   (3)   world frame position delta
-        delta_rot   (3)   world frame rotation vector delta
-        gripper_cmd (1)   normalised [0=closed, 1=open]
+    Action vector per timestep (4-dim):
+        ee_pos_target   (3)   absolute world frame position (from actual ee_pos)
+        gripper_cmd     (1)   normalised [0=closed, 1=open]
     """
 
-    OBS_DIM = 22
-    ACT_DIM = 7
+    OBS_DIM = 28
+    ACT_DIM = 4
 
     def __init__(self, episodes: list[Episode], normalise: bool = True,
                  subsample: int = 1):
@@ -38,33 +38,14 @@ class BCDataset(Dataset):
 
         if normalise:
             self.obs_mean = self.obs.mean(0)
-            self.obs_std  = self.obs.std(0).clamp(min=1e-6)
+            self.obs_std  = self.obs.std(0).clamp(min=1e-2)
             self.act_mean = self.acts.mean(0)
-            self.act_std  = self.acts.std(0).clamp(min=1e-6)
+            self.act_std  = self.acts.std(0).clamp(min=1e-4)
         else:
             self.obs_mean = torch.zeros(self.OBS_DIM)
             self.obs_std  = torch.ones(self.OBS_DIM)
             self.act_mean = torch.zeros(self.ACT_DIM)
             self.act_std  = torch.ones(self.ACT_DIM)
-
-    def _compute_delta_actions(self, ee_pos_cmd: np.ndarray,
-                                ee_quat_cmd: np.ndarray) -> np.ndarray:
-        """Compute delta pos and delta rotvec between consecutive commanded poses."""
-        T = len(ee_pos_cmd)
-        delta_pos = np.zeros((T, 3), dtype=np.float32)
-        delta_rot = np.zeros((T, 3), dtype=np.float32)
-
-        for t in range(T - 1):
-            delta_pos[t] = ee_pos_cmd[t + 1] - ee_pos_cmd[t]
-            r_curr = R.from_quat(ee_quat_cmd[t,  [1, 2, 3, 0]])
-            r_next = R.from_quat(ee_quat_cmd[t+1,[1, 2, 3, 0]])
-            r_delta = r_curr.inv() * r_next
-            delta_rot[t] = r_delta.as_rotvec()
-
-        # Last step gets zero delta
-        delta_pos[-1] = 0.0
-        delta_rot[-1] = 0.0
-        return delta_pos, delta_rot
 
     def _build_tensors(self, episodes: list[Episode]) -> tuple[torch.Tensor, torch.Tensor]:
         """Flatten all episodes into (N, obs_dim) and (N, act_dim) tensors."""
@@ -72,35 +53,40 @@ class BCDataset(Dataset):
         all_acts = []
 
         for ep in episodes:
-            # Subsample episode
             idx = np.arange(0, len(ep.ee_pos), self.subsample)
-            ee_pos      = ep.ee_pos[idx]
-            ee_quat     = ep.ee_quat[idx]
-            ee_pos_cmd  = ep.ee_pos_cmd[idx]
-            ee_quat_cmd = ep.ee_quat_cmd[idx]
-            obj_pos     = ep.obj_pos[idx]
-            obj_quat    = ep.obj_quat[idx]
-            gripper_w   = ep.gripper_width[idx]
+            ee_pos    = ep.ee_pos[idx]
+            ee_quat   = ep.ee_quat[idx]
+            obj_pos   = ep.obj_pos[idx]
+            obj_quat  = ep.obj_quat[idx]
+            gripper_w = ep.gripper_width[idx]
             T = len(ee_pos)
 
             pick_tiled  = np.tile(ep.pick_pos,  (T, 1))
             place_tiled = np.tile(ep.place_pos, (T, 1))
             mode_tiled  = np.full((T, 1), ep.mode, dtype=np.float32)
 
-            gripper_w_col  = gripper_w.reshape(-1, 1)
-            gripper_cmd    = np.clip(gripper_w / 0.08, 0.0, 1.0).reshape(-1, 1)
+            rel_to_obj   = ee_pos - obj_pos
+            rel_to_place = ee_pos - place_tiled
 
-            delta_pos, delta_rot = self._compute_delta_actions(ee_pos_cmd, ee_quat_cmd)
+            gripper_w_col = gripper_w.reshape(-1, 1)
+            gripper_cmd   = np.clip(gripper_w / 0.08, 0.0, 1.0).reshape(-1, 1)
+
+            # Action: next ee_pos (shift by 1) + gripper
+            # Use ee_pos shifted by 1 step as the target — policy predicts where to go next
+            next_ee_pos = np.roll(ee_pos, -1, axis=0)
+            next_ee_pos[-1] = ee_pos[-1]  # last step targets itself
 
             obs = np.concatenate([
                 ee_pos, ee_quat,
                 obj_pos, obj_quat,
                 pick_tiled, place_tiled,
+                rel_to_obj, rel_to_place,
                 gripper_w_col, mode_tiled,
             ], axis=1).astype(np.float32)
 
             act = np.concatenate([
-                delta_pos, delta_rot, gripper_cmd,
+                next_ee_pos,
+                gripper_cmd,
             ], axis=1).astype(np.float32)
 
             all_obs.append(obs)
@@ -141,7 +127,7 @@ class BCDataset(Dataset):
 
 def make_datasets(hdf5_path: Path, val_split: float = 0.1,
                   normalise: bool = True, seed: int = 42,
-                  subsample: int = 1) -> tuple[BCDataset, BCDataset]:
+                  subsample: int = 1, norm_acts: bool = True) -> tuple[BCDataset, BCDataset]:
     """Load HDF5, split into train/val BCDatasets, fit normalisation on train only."""
     episodes = load_from_hdf5(hdf5_path)
 

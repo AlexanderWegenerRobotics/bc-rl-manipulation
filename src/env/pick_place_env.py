@@ -81,22 +81,13 @@ class PickPlaceEnv(gym.Env):
         info = self._get_info()
         return obs, info
 
-    def step(self, action: np.ndarray):
-        """Apply delta action, step sim, return gym tuple."""
-        delta_pos = np.clip(action[:3], -self._delta_pos_clip, self._delta_pos_clip)
-        delta_rot = np.clip(action[3:6], -self._delta_rot_clip, self._delta_rot_clip)
-        gripper_cmd = float(np.clip(action[6], 0.0, 1.0))
-
-        new_pos  = self._current_pos_world + delta_pos
-
-        r_curr   = R.from_quat(self._current_quat_world[[1, 2, 3, 0]])
-        r_delta  = R.from_rotvec(delta_rot)
-        r_new    = r_curr * r_delta
-        q_xyzw   = r_new.as_quat()
-        new_quat = q_xyzw[[3, 0, 1, 2]]
-
-        grasp = int(gripper_cmd * 255)
-        self.sim.step_world(new_pos, new_quat, grasp=grasp)
+    def step(self, action):
+        pos_world   = action[:3]
+        gripper_cmd = float(action[3])
+        # use current EE orientation unchanged
+        quat_world  = self._current_quat_world
+        grasp = int(np.clip(gripper_cmd, 0.0, 1.0) * 255)
+        self.sim.step_world(pos_world, quat_world, grasp=grasp)
 
         raw = self.sim.get_obs()
         self._current_pos_world  = raw['ee_pos'].copy()
@@ -122,13 +113,15 @@ class PickPlaceEnv(gym.Env):
         if self._renderer is not None:
             self._renderer.close()
 
-    def _get_obs(self) -> np.ndarray:
-        """Build the flat 22-dim observation vector from sim state."""
+    def _get_obs(self):
         raw = self.sim.get_obs()
+        rel_to_obj   = raw['ee_pos'] - raw['obj_pos']
+        rel_to_place = raw['ee_pos'] - raw['place_pos']
         obs = np.concatenate([
             raw['ee_pos'], raw['ee_quat'],
             raw['obj_pos'], raw['obj_quat'],
             raw['pick_pos'], raw['place_pos'],
+            rel_to_obj, rel_to_place,
             [raw['gripper_width']], [0.0],
         ]).astype(np.float32)
         return obs

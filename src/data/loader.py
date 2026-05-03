@@ -178,7 +178,7 @@ def load_episode(episode_dir: Path, arm: str = 'arm_left') -> Episode | None:
 
     gripper_width = merged['gripper_width'].values
 
-    return Episode(
+    ep = Episode(
         ee_pos        = ee_pos,
         ee_quat       = ee_quat,
         ee_pos_cmd    = ee_pos_cmd,
@@ -192,8 +192,15 @@ def load_episode(episode_dir: Path, arm: str = 'arm_left') -> Episode | None:
         episode_id    = episode_dir.name,
     )
 
+    for field in ['ee_pos', 'ee_quat', 'ee_pos_cmd', 'ee_quat_cmd', 'obj_pos', 'obj_quat', 'gripper_width']:
+        if np.isnan(getattr(ep, field)).any():
+            print(f"[SKIP] NaN in {episode_dir.name} field {field}")
+            return None
 
-def load_all_episodes(log_root: Path, arm: str = 'arm_right') -> list[Episode]:
+    return ep
+
+
+def load_all_episodes(log_root: Path, arm: str = 'arm_left') -> list[Episode]:
     """Load all episode folders from log_root, skipping incomplete or failed ones."""
     dirs     = sorted([d for d in log_root.iterdir() if d.is_dir()])
     episodes = []

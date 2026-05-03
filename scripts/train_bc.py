@@ -25,7 +25,7 @@ def parse_args():
     parser.add_argument('--hidden',       type=int,   nargs='+', default=[256, 256, 128])
     parser.add_argument('--val-split',    type=float, default=0.15)
     parser.add_argument('--subsample',    type=int,   default=10,  help='Subsample every Nth step from each episode')
-    parser.add_argument('--device',       type=str,   default='gpu')
+    parser.add_argument('--device',       type=str,   default='auto')
     parser.add_argument('--seed',         type=int,   default=42)
     return parser.parse_args()
 
@@ -66,7 +66,14 @@ def main():
     np.random.seed(args.seed)
 
     print(f"Loading dataset from {args.data}")
-    train_ds, val_ds = make_datasets(args.data, val_split=args.val_split, normalise=True, seed=args.seed, subsample=args.subsample)
+    train_ds, val_ds = make_datasets(
+        args.data,
+        val_split  = args.val_split,
+        normalise  = True,
+        seed       = args.seed,
+        subsample  = args.subsample,
+        norm_acts  = False,
+    )
 
     train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True,  num_workers=0)
     val_loader   = DataLoader(val_ds,   batch_size=args.batch_size, shuffle=False, num_workers=0)
