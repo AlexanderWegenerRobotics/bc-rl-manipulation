@@ -7,6 +7,11 @@ simulation:
   steps_per_action: 5
   q0: [0.3, -1.1, -0.3, -2.0, -0.5, 2.9, 0.9]
 
+policy:
+  delta_pos_clip: 0.05
+  delta_rot_clip: 0.1
+  subsample: 10
+
 robot:
   urdf_path: "models/urdf/franka_fr3/fr3_franka_hand.urdf"
   ee_frame_name: "fr3_hand_tcp"

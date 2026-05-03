@@ -1,0 +1,30 @@
+# Core
+numpy
+scipy
+pyyaml
+pathlib
+
+# MuJoCo
+mujoco
+
+# Robot kinematics
+pin  # pinocchio
+
+# Machine learning
+torch
+torchvision
+
+# Data
+h5py
+pandas
+
+# RL environment
+gymnasium
+
+# Visualisation
+matplotlib
+jupyter
+ipykernel
+
+# Utilities
+tqdm

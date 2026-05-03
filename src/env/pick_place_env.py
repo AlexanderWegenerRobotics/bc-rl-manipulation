@@ -6,19 +6,20 @@ import numpy as np
 import gymnasium as gym
 from gymnasium import spaces
 from typing import Optional
+from scipy.spatial.transform import Rotation as R
 
 from src.simulation.sim import Simulation
 from src.simulation.rendering import make_renderer
 from src.robot.pose import Pose
 
 
-PLACE_THRESHOLD = 0.05   # metres — object must be within this distance of place target
-MAX_STEPS       = 1000   # episode timeout
+PLACE_THRESHOLD = 0.05
+MAX_STEPS       = 1000
 
 
 class PickPlaceEnv(gym.Env):
     """
-    Gymnasium environment for unimanual pick and place.
+    Gymnasium environment for unimanual pick and place with delta actions.
 
     Observation (22-dim):
         ee_pos      (3)  world frame
@@ -30,9 +31,9 @@ class PickPlaceEnv(gym.Env):
         gripper_w   (1)
         mode        (1)  always 0 for unimanual
 
-    Action (8-dim):
-        ee_pos_cmd  (3)  absolute target position, world frame
-        ee_quat_cmd (4)  absolute target quaternion wxyz, world frame
+    Action (7-dim):
+        delta_pos   (3)  position delta in world frame
+        delta_rot   (3)  rotation vector delta in world frame
         gripper_cmd (1)  normalised [0=closed, 1=open]
     """
 
@@ -45,6 +46,10 @@ class PickPlaceEnv(gym.Env):
         self._renderer   = None
         self._step_count = 0
 
+        policy_cfg = config.get('policy', {})
+        self._delta_pos_clip = policy_cfg.get('delta_pos_clip', 0.05)
+        self._delta_rot_clip = policy_cfg.get('delta_rot_clip', 0.1)
+
         if render_mode == 'human':
             self._renderer = make_renderer(self.sim, config.get('rendering', {}))
 
@@ -52,13 +57,15 @@ class PickPlaceEnv(gym.Env):
         obs_high = np.full(22,  np.inf, dtype=np.float32)
         self.observation_space = spaces.Box(obs_low, obs_high, dtype=np.float32)
 
-        # Action: [pos(3), quat(4), gripper(1)]
-        act_low  = np.array([-np.inf]*3 + [-1]*4 + [0],  dtype=np.float32)
-        act_high = np.array([ np.inf]*3 + [ 1]*4 + [1],  dtype=np.float32)
+        act_low  = np.array([-self._delta_pos_clip]*3 + [-self._delta_rot_clip]*3 + [0.0], dtype=np.float32)
+        act_high = np.array([ self._delta_pos_clip]*3 + [ self._delta_rot_clip]*3 + [1.0], dtype=np.float32)
         self.action_space = spaces.Box(act_low, act_high, dtype=np.float32)
 
+        self._current_pos_world  = None
+        self._current_quat_world = None
+
     def reset(self, seed=None, options=None):
-        """Reset sim with randomised pick/place, return obs and info."""
+        """Reset sim with randomised pick/place and initialise current EE pose."""
         super().reset(seed=seed)
         if seed is not None:
             self.sim._rng = np.random.default_rng(seed)
@@ -66,21 +73,34 @@ class PickPlaceEnv(gym.Env):
         self.sim.reset()
         self._step_count = 0
 
+        raw = self.sim.get_obs()
+        self._current_pos_world  = raw['ee_pos'].copy()
+        self._current_quat_world = raw['ee_quat'].copy()
+
         obs  = self._get_obs()
         info = self._get_info()
         return obs, info
 
     def step(self, action: np.ndarray):
-        """Apply action, step sim, return (obs, reward, terminated, truncated, info)."""
-        pos_world  = action[:3]
-        quat_world = action[3:7]
-        quat_world = quat_world / (np.linalg.norm(quat_world) + 1e-8)
-        gripper_cmd = float(action[7])
+        """Apply delta action, step sim, return gym tuple."""
+        delta_pos = np.clip(action[:3], -self._delta_pos_clip, self._delta_pos_clip)
+        delta_rot = np.clip(action[3:6], -self._delta_rot_clip, self._delta_rot_clip)
+        gripper_cmd = float(np.clip(action[6], 0.0, 1.0))
 
-        # Convert gripper [0=closed, 1=open] to MuJoCo ctrl [0=closed, 255=open]
-        grasp = int(np.clip(gripper_cmd, 0.0, 1.0) * 255)
+        new_pos  = self._current_pos_world + delta_pos
 
-        self.sim.step_world(pos_world, quat_world, grasp=grasp)
+        r_curr   = R.from_quat(self._current_quat_world[[1, 2, 3, 0]])
+        r_delta  = R.from_rotvec(delta_rot)
+        r_new    = r_curr * r_delta
+        q_xyzw   = r_new.as_quat()
+        new_quat = q_xyzw[[3, 0, 1, 2]]
+
+        grasp = int(gripper_cmd * 255)
+        self.sim.step_world(new_pos, new_quat, grasp=grasp)
+
+        raw = self.sim.get_obs()
+        self._current_pos_world  = raw['ee_pos'].copy()
+        self._current_quat_world = raw['ee_quat'].copy()
         self._step_count += 1
 
         obs        = self._get_obs()
@@ -102,10 +122,15 @@ class PickPlaceEnv(gym.Env):
         if self._renderer is not None:
             self._renderer.close()
 
-    def _get_obs(self):
+    def _get_obs(self) -> np.ndarray:
+        """Build the flat 22-dim observation vector from sim state."""
         raw = self.sim.get_obs()
-        parts = [ raw['ee_pos'], raw['ee_quat'], raw['obj_pos'], raw['obj_quat'], raw['pick_pos'], raw['place_pos'], [raw['gripper_width']], [0.0], ]
-        obs = np.concatenate(parts).astype(np.float32)
+        obs = np.concatenate([
+            raw['ee_pos'], raw['ee_quat'],
+            raw['obj_pos'], raw['obj_quat'],
+            raw['pick_pos'], raw['place_pos'],
+            [raw['gripper_width']], [0.0],
+        ]).astype(np.float32)
         return obs
 
     def _get_info(self) -> dict:

@@ -2,16 +2,16 @@ import numpy as np
 import torch
 import torch.nn as nn
 from pathlib import Path
+from scipy.spatial.transform import Rotation as R
 
 
 class MLPPolicy(nn.Module):
-    """MLP policy for behaviour cloning. Maps obs -> action in a single forward pass."""
+    """MLP policy for behaviour cloning. Maps obs -> delta action in a single forward pass."""
 
     def __init__(self, obs_dim: int, act_dim: int,
                  hidden_dims: list[int] = [256, 256, 128],
                  dropout: float = 0.0):
         super().__init__()
-
         layers = []
         in_dim = obs_dim
         for h in hidden_dims:
@@ -20,7 +20,6 @@ class MLPPolicy(nn.Module):
                 layers.append(nn.Dropout(dropout))
             in_dim = h
         layers.append(nn.Linear(in_dim, act_dim))
-
         self.net = nn.Sequential(*layers)
 
     def forward(self, obs: torch.Tensor) -> torch.Tensor:
@@ -34,12 +33,11 @@ class BCPolicy:
                  hidden_dims: list[int] = [256, 256, 128],
                  dropout: float = 0.0,
                  device: str = 'cpu'):
-        self.dropout = dropout
+        self.dropout  = dropout
         self.device   = torch.device(device)
         self.obs_dim  = obs_dim
         self.act_dim  = act_dim
-
-        self.model = MLPPolicy(obs_dim, act_dim, hidden_dims, dropout).to(self.device)
+        self.model    = MLPPolicy(obs_dim, act_dim, hidden_dims, dropout).to(self.device)
 
         self.obs_mean = torch.zeros(obs_dim, device=self.device)
         self.obs_std  = torch.ones(obs_dim,  device=self.device)
@@ -54,13 +52,13 @@ class BCPolicy:
         self.act_std  = torch.tensor(stats['act_std'],  dtype=torch.float32, device=self.device)
 
     def predict(self, obs: np.ndarray) -> np.ndarray:
-        """Run a single forward pass, returning a denormalised action as numpy."""
+        """Run a single forward pass, returning a denormalised delta action as numpy."""
         self.model.eval()
         with torch.no_grad():
-            obs_t  = torch.tensor(obs, dtype=torch.float32, device=self.device)
-            obs_n  = (obs_t - self.obs_mean) / self.obs_std
-            act_n  = self.model(obs_n)
-            act    = act_n * self.act_std + self.act_mean
+            obs_t = torch.tensor(obs, dtype=torch.float32, device=self.device)
+            obs_n = (obs_t - self.obs_mean) / self.obs_std
+            act_n = self.model(obs_n)
+            act   = act_n * self.act_std + self.act_mean
         return act.cpu().numpy()
 
     def save(self, path: Path, extra: dict = None):
@@ -84,12 +82,8 @@ class BCPolicy:
     @classmethod
     def load(cls, path: Path, device: str = 'cpu') -> 'BCPolicy':
         """Load a saved BCPolicy from disk."""
-        payload  = torch.load(path, map_location=device, weights_only=False)
-        policy   = cls(
-            obs_dim     = payload['obs_dim'],
-            act_dim     = payload['act_dim'],
-            device      = device,
-        )
+        payload = torch.load(path, map_location=device, weights_only=False)
+        policy  = cls(obs_dim=payload['obs_dim'], act_dim=payload['act_dim'], device=device)
         policy.model.load_state_dict(payload['model_state'])
         policy.set_normalisation({
             'obs_mean': payload['obs_mean'],
