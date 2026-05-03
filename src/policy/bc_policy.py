@@ -32,9 +32,17 @@ class BCPolicy:
     def __init__(self, obs_dim: int, act_dim: int,
                  hidden_dims: list[int] = [256, 256, 128],
                  dropout: float = 0.0,
-                 device: str = 'cpu'):
+                 device: str = 'auto'):
         self.dropout  = dropout
-        self.device   = torch.device(device)
+        if device == 'auto':
+            if torch.cuda.is_available():
+                device = 'cuda'
+            elif torch.backends.mps.is_available():
+                device = 'mps'
+            else:
+                device = 'cpu'
+        print(f"Using {device} for training")
+        self.device = torch.device(device)
         self.obs_dim  = obs_dim
         self.act_dim  = act_dim
         self.model    = MLPPolicy(obs_dim, act_dim, hidden_dims, dropout).to(self.device)
