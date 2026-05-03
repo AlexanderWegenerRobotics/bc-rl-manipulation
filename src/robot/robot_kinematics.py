@@ -6,8 +6,16 @@ ARM_DOF = 7
 
 
 class RobotKinematics:
-    def __init__(self, urdf_path: str, ee_frame_name: str = "fr3_hand_tcp", q_hand_default=None):
+    def __init__(self, urdf_path: str, ee_frame_name: str = "fr3_hand_tcp",
+                 q_hand_default=None, base_quat_wxyz: np.ndarray = None):
         self.model = pin.buildModelFromUrdf(urdf_path)
+
+        if base_quat_wxyz is not None:
+            from scipy.spatial.transform import Rotation as R
+            q = np.array(base_quat_wxyz)
+            rot = R.from_quat([q[1], q[2], q[3], q[0]])
+            self.model.gravity.linear = rot.as_matrix().T @ np.array([0, 0, -9.81])
+
         self.data = self.model.createData()
         self.nq = self.model.nq
         self.nv = self.model.nv
